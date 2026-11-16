@@ -1,164 +1,446 @@
 // ============================================================
-// MapCanvas.jsx — Core OpenLayers Map Component
+// MapCanvas.jsx — OpenLayers Interactive Map with Full Geometry Tools
 // ------------------------------------------------------------
-// This is the heart of the application. It creates and manages
-// the interactive map using the OpenLayers library.
+// This component manages the complete OpenLayers map lifecycle:
 //
-// What this component does:
-//   1. Creates a full-screen map inside a <div> element
-//   2. Adds a base tile layer (OpenStreetMap) so you can see
-//      the world map with streets, borders, etc.
-//   3. Adds an empty "drawing layer" where user-created shapes
-//      (points, polygons, rectangles, lines) will live
-//   4. Centers the map on a default location (India)
-//
-// Key concepts:
-//   - ol/Map: The main map object that manages all layers and interactions
-//   - ol/View: Controls what part of the world is visible (center, zoom)
-//   - ol/layer/Tile + ol/source/OSM: Loads map tiles from OpenStreetMap
-//   - ol/layer/Vector + ol/source/Vector: A layer for user-drawn shapes
-//   - EPSG:3857: The coordinate system used by web maps (meters)
-//   - EPSG:4326: Standard lat/lng coordinates (degrees) — we convert
-//     between these two systems as needed
+// Key capabilities in Phase 2:
+//   1. Base tile rendering (OpenStreetMap)
+//   2. Dynamic user layers (VectorLayer + VectorSource per layer)
+//   3. Drawing interactions (`ol/interaction/Draw`):
+//      - Point (`type: 'Point'`)
+//      - Rectangle (`type: 'Circle'` + `createBox()`)
+//      - Polygon (`type: 'Polygon'`)
+//      - Direction / Route (`type: 'LineString'`)
+//   4. Vertex modification (`ol/interaction/Modify`):
+//      - Drag individual polygon/line vertices to reshape
+//   5. Shape translation (`ol/interaction/Translate`):
+//      - Click & drag entire shapes across coordinates
+//   6. Vertex snapping (`ol/interaction/Snap`):
+//      - Precision alignment between adjacent shapes
+//   7. Click-to-delete in 'delete' mode
+//   8. Click-to-inspect in 'select' mode (opens FeaturePropertiesDialog)
 // ============================================================
 
 import React, { useRef, useEffect, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 
-// --- OpenLayers Imports ---
-// Map: The main map controller
+// --- OpenLayers Core ---
 import Map from 'ol/Map';
-// View: Defines what area of the world the map shows
 import View from 'ol/View';
-// TileLayer: Displays pre-rendered map image tiles (the background map)
 import TileLayer from 'ol/layer/Tile';
-// OSM: OpenStreetMap tile source — free, open-source world map tiles
 import OSM from 'ol/source/OSM';
-// VectorLayer: A layer that can hold custom shapes/features we draw
 import VectorLayer from 'ol/layer/Vector';
-// VectorSource: The data container for our custom shapes
 import VectorSource from 'ol/source/Vector';
-// fromLonLat: Converts longitude/latitude (EPSG:4326) to web map
-// coordinates (EPSG:3857) that OpenLayers uses internally
 import { fromLonLat } from 'ol/proj';
 
-// OpenLayers CSS — required for the map to render correctly
-// (handles map controls, zoom buttons, attribution styling, etc.)
+// --- OpenLayers Interactions ---
+import Draw, { createBox } from 'ol/interaction/Draw';
+import Modify from 'ol/interaction/Modify';
+import Translate from 'ol/interaction/Translate';
+import Snap from 'ol/interaction/Snap';
+
+// --- Styling Helpers & Subcomponents ---
+import { createFeatureStyle } from '../services/styleHelper';
+import FeaturePropertiesDialog from './FeaturePropertiesDialog';
 import 'ol/ol.css';
 
 // ============================================================
 // MapCanvas Component
 // ------------------------------------------------------------
-// Props: None currently (will receive toolbar state in Phase 2)
-// Returns: A full-screen div containing the OpenLayers map
+// Props:
+//   layers (Array) — List of user layer definitions from App.jsx
+//   activeLayerId (string) — ID of the current drawing target layer
+//   activeTool (string) — Selected tool: 'select'|'point'|'rectangle'|'polygon'|'direction'|'delete'
+//   onFeaturesCountChange (function) — Notifies App when feature count changes in layers
 // ============================================================
-const MapCanvas = () => {
-  // --- Refs ---
-  // mapContainerRef: Points to the HTML <div> where the map renders.
-  // We use useRef (not useState) because the div doesn't change —
-  // we just need a stable reference to pass to OpenLayers.
+const MapCanvas = ({
+  layers,
+  activeLayerId,
+  activeTool,
+  onFeaturesCountChange,
+}) => {
+  // DOM element container for OpenLayers canvas
   const mapContainerRef = useRef(null);
-
-  // mapRef: Stores the OpenLayers Map instance so we can access
-  // it later (e.g., to add interactions, layers, or get the current view).
-  // Using useRef avoids re-creating the map on every React re-render.
+  // Persisted Map instance
   const mapRef = useRef(null);
 
-  // --- State ---
-  // drawSource: The VectorSource that holds all user-drawn features.
-  // We store it in state so other components (toolbar, layer panel)
-  // can access it to add/remove/query shapes.
-  const [drawSource] = useState(() => new VectorSource());
+  // Map of layerId -> { vectorLayer, vectorSource }
+  // Stored in a ref so OpenLayers interactions can access it without causing React re-renders
+  const layerRegistryRef = useRef(new Map());
+
+  // Currently active OpenLayers interactions
+  const activeInteractionsRef = useRef([]);
+
+  // State for feature properties inspection modal
+  const [selectedFeature, setSelectedFeature] = useState(null);
+  const [selectedFeatureLayerName, setSelectedFeatureLayerName] = useState('');
+  const [inspectorOpen, setInspectorOpen] = useState(false);
 
   // ============================================================
-  // Map Initialization Effect
-  // ------------------------------------------------------------
-  // useEffect with [] dependency = runs ONCE when component mounts.
-  // This is where we create the OpenLayers Map and attach it to
-  // the HTML div. We also return a cleanup function that destroys
-  // the map when the component unmounts (prevents memory leaks).
+  // Step 1: Initialize the OpenLayers Map (Runs ONCE on mount)
   // ============================================================
   useEffect(() => {
-    // Safety check: don't create the map if the div isn't ready
-    // or if we already created a map (prevents double-init in StrictMode)
     if (!mapContainerRef.current || mapRef.current) return;
 
-    // --- Create the OpenLayers Map ---
+    // Create the OpenLayers Map instance
     const map = new Map({
-      // Attach the map to our <div> element
       target: mapContainerRef.current,
-
-      // --- Layers (bottom to top) ---
       layers: [
-        // Layer 1: Base Map (OpenStreetMap tiles)
-        // This is the background world map with streets, cities, etc.
-        // Tiles are 256x256 pixel images loaded from OSM servers.
+        // Base World Map Tile Layer
         new TileLayer({
           source: new OSM(),
-          // Preload tiles around the visible area for smoother panning
           preload: 4,
         }),
-
-        // Layer 2: Drawing Layer (empty for now)
-        // This is where all user-drawn shapes will appear.
-        // It sits ON TOP of the base map so shapes are always visible.
-        new VectorLayer({
-          source: drawSource,
-          // We'll add custom styles in Phase 2
-          // (different colors for points, polygons, lines, etc.)
-        }),
       ],
-
-      // --- View (what part of the world is visible) ---
       view: new View({
-        // Center the map on India (78.9629° E, 20.5937° N)
-        // fromLonLat converts [longitude, latitude] to EPSG:3857
+        // Centered on India (78.9629° E, 20.5937° N)
         center: fromLonLat([78.9629, 20.5937]),
-
-        // Zoom level 5 shows most of India
-        // (zoom 0 = whole world, zoom 18 = street level)
         zoom: 5,
-
-        // Limit zoom range to prevent excessive tile loading
-        minZoom: 2,   // Don't zoom out too far
-        maxZoom: 19,  // Street-level detail
+        minZoom: 2,
+        maxZoom: 19,
       }),
     });
 
-    // Store the map instance for later use
     mapRef.current = map;
+    console.log('🗺️ OpenLayers map successfully initialized');
 
-    // Log confirmation for debugging
-    console.log('✅ OpenLayers map initialized successfully');
-
-    // --- Cleanup Function ---
-    // When this component is removed from the page (unmount),
-    // properly dispose of the map to free memory
+    // Cleanup when component unmounts
     return () => {
       if (mapRef.current) {
-        mapRef.current.setTarget(undefined); // Detach from DOM
+        mapRef.current.setTarget(undefined);
         mapRef.current = null;
       }
     };
-  }, [drawSource]); // drawSource is stable (created once via useState initializer)
+  }, []);
 
   // ============================================================
-  // Render
+  // Step 2: Synchronize User Layers with OpenLayers Map
   // ------------------------------------------------------------
-  // We render a single <div> that fills the entire screen.
-  // OpenLayers will take over this div and render the map canvas
-  // inside it (using HTML5 Canvas for the map tiles and shapes).
+  // Whenever the `layers` prop changes (layer added, color updated,
+  // visibility toggled, or layer removed), synchronize the map's
+  // VectorLayer instances.
   // ============================================================
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const registry = layerRegistryRef.current;
+    const currentLayerIds = new Set(layers.map((l) => l.id));
+
+    // 1. Remove deleted layers from map
+    for (const [id, entry] of registry.entries()) {
+      if (!currentLayerIds.has(id)) {
+        map.removeLayer(entry.vectorLayer);
+        registry.delete(id);
+      }
+    }
+
+    // 2. Add or update layers
+    layers.forEach((layerDef) => {
+      let entry = registry.get(layerDef.id);
+
+      if (!entry) {
+        // Create new VectorSource for this layer
+        const vectorSource = new VectorSource();
+
+        // Create new VectorLayer with a dynamic style function
+        const vectorLayer = new VectorLayer({
+          source: vectorSource,
+          visible: layerDef.visible,
+          // OpenLayers style function: called whenever a feature on this layer renders
+          style: (feature) => createFeatureStyle(feature, layerDef.color),
+        });
+
+        // Store user layer ID on the OpenLayers layer object for reverse lookups
+        vectorLayer.set('layerId', layerDef.id);
+
+        // Add layer to map
+        map.addLayer(vectorLayer);
+
+        entry = { vectorLayer, vectorSource };
+        registry.set(layerDef.id, entry);
+      } else {
+        // Update layer visibility if changed
+        entry.vectorLayer.setVisible(layerDef.visible);
+
+        // Update layer style function in case the user picked a new color
+        entry.vectorLayer.setStyle((feature) => createFeatureStyle(feature, layerDef.color));
+      }
+    });
+
+    // Refresh feature counts in parent UI
+    updateFeatureCounts();
+  }, [layers]);
+
+  // Helper: Count shapes in each layer and report back to parent
+  const updateFeatureCounts = () => {
+    if (!onFeaturesCountChange) return;
+
+    const counts = {};
+    layerRegistryRef.current.forEach((entry, layerId) => {
+      counts[layerId] = entry.vectorSource.getFeatures().length;
+    });
+
+    onFeaturesCountChange(counts);
+  };
+
+  // ============================================================
+  // Step 3: Manage Drawing, Editing & Selection Interactions
+  // ------------------------------------------------------------
+  // Whenever `activeTool` or `activeLayerId` changes, update the
+  // active OpenLayers interactions (Draw, Modify, Translate, Snap).
+  // ============================================================
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // --- Helper: Remove all previous interactions ---
+    const cleanupInteractions = () => {
+      activeInteractionsRef.current.forEach((interaction) => {
+        map.removeInteraction(interaction);
+      });
+      activeInteractionsRef.current = [];
+    };
+
+    cleanupInteractions();
+
+    const activeEntry = layerRegistryRef.current.get(activeLayerId);
+    if (!activeEntry) return;
+
+    const activeSource = activeEntry.vectorSource;
+    const activeLayerDef = layers.find((l) => l.id === activeLayerId);
+    const activeColor = activeLayerDef ? activeLayerDef.color : '#1976d2';
+
+    // ----------------------------------------------------------
+    // A. DRAWING TOOLS ('point', 'rectangle', 'polygon', 'direction')
+    // ----------------------------------------------------------
+    if (['point', 'rectangle', 'polygon', 'direction'].includes(activeTool)) {
+      let drawInteraction = null;
+
+      if (activeTool === 'point') {
+        // Draw single point marker
+        drawInteraction = new Draw({
+          source: activeSource,
+          type: 'Point',
+        });
+      } else if (activeTool === 'rectangle') {
+        // Draw rectangle using Circle type + createBox geometry function
+        drawInteraction = new Draw({
+          source: activeSource,
+          type: 'Circle',
+          geometryFunction: createBox(),
+        });
+      } else if (activeTool === 'polygon') {
+        // Draw multi-sided polygon (click to place vertices, double-click to finish)
+        drawInteraction = new Draw({
+          source: activeSource,
+          type: 'Polygon',
+        });
+      } else if (activeTool === 'direction') {
+        // Draw direction line / route (click vertices, double-click to finish)
+        drawInteraction = new Draw({
+          source: activeSource,
+          type: 'LineString',
+        });
+      }
+
+      if (drawInteraction) {
+        // --- Event: When shape drawing completes ---
+        drawInteraction.on('drawend', (event) => {
+          const feature = event.feature;
+          const shapeTypeMap = {
+            point: 'Point',
+            rectangle: 'Rectangle',
+            polygon: 'Polygon',
+            direction: 'Direction',
+          };
+
+          const shapeType = shapeTypeMap[activeTool] || 'Shape';
+          const shapeCount = activeSource.getFeatures().length + 1;
+
+          // Assign essential geospatial metadata to the feature
+          feature.set('id', uuidv4());
+          feature.set('layerId', activeLayerId);
+          feature.set('shapeType', shapeType);
+          feature.set('name', `${shapeType} ${shapeCount}`);
+          feature.set('isHighlighted', false);
+          feature.set('version', 1);
+          feature.set('isDeleted', false);
+          feature.set('createdAt', new Date().toISOString());
+          feature.set('updatedAt', new Date().toISOString());
+
+          // Apply initial style
+          feature.setStyle(createFeatureStyle(feature, activeColor));
+
+          // Schedule feature count update on next tick
+          setTimeout(updateFeatureCounts, 50);
+        });
+
+        // Add Draw interaction to map
+        map.addInteraction(drawInteraction);
+        activeInteractionsRef.current.push(drawInteraction);
+
+        // Add Snap interaction for vertex alignment while drawing
+        const snap = new Snap({ source: activeSource });
+        map.addInteraction(snap);
+        activeInteractionsRef.current.push(snap);
+      }
+    }
+
+    // ----------------------------------------------------------
+    // B. SELECT & MOVE MODE ('select')
+    // ----------------------------------------------------------
+    if (activeTool === 'select') {
+      // 1. Modify: Allows dragging individual vertices of lines & polygons
+      const modify = new Modify({ source: activeSource });
+      modify.on('modifyend', (event) => {
+        event.features.forEach((feat) => {
+          feat.set('updatedAt', new Date().toISOString());
+        });
+      });
+      map.addInteraction(modify);
+      activeInteractionsRef.current.push(modify);
+
+      // 2. Translate: Allows dragging entire shapes across coordinates
+      const translate = new Translate({
+        layers: [activeEntry.vectorLayer],
+      });
+      translate.on('translateend', (event) => {
+        event.features.forEach((feat) => {
+          feat.set('updatedAt', new Date().toISOString());
+        });
+      });
+      map.addInteraction(translate);
+      activeInteractionsRef.current.push(translate);
+
+      // 3. Snap: Smooth snapping during modification
+      const snap = new Snap({ source: activeSource });
+      map.addInteraction(snap);
+      activeInteractionsRef.current.push(snap);
+    }
+
+    return cleanupInteractions;
+  }, [activeTool, activeLayerId, layers]);
+
+  // ============================================================
+  // Step 4: Handle Map Clicks for Select & Delete Modes
+  // ============================================================
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const handleSingleClick = (event) => {
+      // In drawing modes, clicks are handled by Draw interaction
+      if (['point', 'rectangle', 'polygon', 'direction'].includes(activeTool)) {
+        return;
+      }
+
+      // Check if user clicked on any vector feature at this pixel
+      const clickedFeature = map.forEachFeatureAtPixel(
+        event.pixel,
+        (feature) => feature
+      );
+
+      // --- Mode: DELETE ---
+      if (activeTool === 'delete') {
+        if (clickedFeature) {
+          // Find which layer owns this feature
+          const layerId = clickedFeature.get('layerId');
+          const entry = layerRegistryRef.current.get(layerId);
+          if (entry) {
+            // Remove feature from OpenLayers source
+            entry.vectorSource.removeFeature(clickedFeature);
+            updateFeatureCounts();
+          }
+        }
+        return;
+      }
+
+      // --- Mode: SELECT (Inspect & Edit Properties) ---
+      if (activeTool === 'select') {
+        if (clickedFeature) {
+          const layerId = clickedFeature.get('layerId');
+          const layerDef = layers.find((l) => l.id === layerId);
+
+          setSelectedFeature(clickedFeature);
+          setSelectedFeatureLayerName(layerDef ? layerDef.name : 'Layer');
+          setInspectorOpen(true);
+        } else {
+          // Clicked on empty space — close inspector
+          setInspectorOpen(false);
+          setSelectedFeature(null);
+        }
+      }
+    };
+
+    map.on('singleclick', handleSingleClick);
+
+    return () => {
+      map.un('singleclick', handleSingleClick);
+    };
+  }, [activeTool, layers]);
+
+  // ============================================================
+  // Feature Inspector Handlers
+  // ============================================================
+  // Save updated properties (Name, Highlight toggle)
+  const handleSaveFeatureProperties = ({ name, isHighlighted }) => {
+    if (!selectedFeature) return;
+
+    selectedFeature.set('name', name);
+    selectedFeature.set('isHighlighted', isHighlighted);
+    selectedFeature.set('updatedAt', new Date().toISOString());
+
+    // Re-render feature with updated style (highlighted or normal)
+    const layerId = selectedFeature.get('layerId');
+    const layerDef = layers.find((l) => l.id === layerId);
+    const color = layerDef ? layerDef.color : '#1976d2';
+
+    selectedFeature.setStyle(createFeatureStyle(selectedFeature, color));
+  };
+
+  // Delete selected feature from inspector dialog
+  const handleDeleteFeatureFromInspector = (feature) => {
+    if (!feature) return;
+
+    const layerId = feature.get('layerId');
+    const entry = layerRegistryRef.current.get(layerId);
+    if (entry) {
+      entry.vectorSource.removeFeature(feature);
+      updateFeatureCounts();
+    }
+  };
+
   return (
-    <div
-      ref={mapContainerRef}
-      style={{
-        width: '100%',
-        height: '100%',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-      }}
-    />
+    <>
+      {/* Map Canvas Container */}
+      <div
+        ref={mapContainerRef}
+        style={{
+          width: '100%',
+          height: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          // Change cursor to crosshair when drawing
+          cursor: ['point', 'rectangle', 'polygon', 'direction'].includes(activeTool)
+            ? 'crosshair'
+            : activeTool === 'delete'
+            ? 'not-allowed'
+            : 'default',
+        }}
+      />
+
+      {/* Feature Properties Inspector Dialog */}
+      <FeaturePropertiesDialog
+        open={inspectorOpen}
+        feature={selectedFeature}
+        layerName={selectedFeatureLayerName}
+        onClose={() => setInspectorOpen(false)}
+        onSave={handleSaveFeatureProperties}
+        onDelete={handleDeleteFeatureFromInspector}
+      />
+    </>
   );
 };
 

@@ -9,7 +9,7 @@
 | Phase | Focus | Est. Duration | Status |
 |-------|-------|---------------|--------|
 | **1** | Project Bootstrap & Base Map | 2–3 days | ✅ Complete |
-| **2** | Geometry Tools & Layer Controls | 4–5 days | 🔲 Not Started |
+| **2** | Geometry Tools & Layer Controls | 4–5 days | ✅ Complete |
 | **3** | Offline Persistence (Dexie.js) | 3–4 days | 🔲 Not Started |
 | **4** | Backend API (Node/Express/MongoDB) | 3–4 days | 🔲 Not Started |
 | **5** | Sync Engine & Conflict Resolution | 4–5 days | 🔲 Not Started |
@@ -75,29 +75,29 @@
 
 ### 2A — Drawing Toolbar (`DrawToolbar.jsx`)
 
-- [ ] **2A.1** Create MUI `ToggleButtonGroup` with modes: Select/Move, Point, Rectangle, Polygon, Direction (Line), Delete
-- [ ] **2A.2** Wire `ol/interaction/Draw` for each geometry type:
+- [x] **2A.1** Create MUI `ToggleButtonGroup` with modes: Select/Move, Point, Rectangle, Polygon, Direction (Line), Delete
+- [x] **2A.2** Wire `ol/interaction/Draw` for each geometry type:
   - Point → `type: 'Point'`
   - Polygon → `type: 'Polygon'`
   - Rectangle → `type: 'Circle'` + `createBox()`
   - Direction → `type: 'LineString'`
-- [ ] **2A.3** Apply custom styles (SVG icons for points, arrows for lines, fill/stroke for polygons)
-- [ ] **2A.4** Implement delete (click-to-select → confirm → remove feature)
+- [x] **2A.3** Apply custom styles (SVG icons for points, arrows for lines, fill/stroke for polygons)
+- [x] **2A.4** Implement delete (click-to-select → confirm → remove feature)
 
 ### 2B — Edit & Move Interactions
 
-- [ ] **2B.1** `ol/interaction/Translate` — drag entire features
-- [ ] **2B.2** `ol/interaction/Modify` — drag individual vertices
-- [ ] **2B.3** `ol/interaction/Snap` — vertex snapping between shapes
-- [ ] **2B.4** Interaction state machine — only one interaction active at a time
+- [x] **2B.1** `ol/interaction/Translate` — drag entire features
+- [x] **2B.2** `ol/interaction/Modify` — drag individual vertices
+- [x] **2B.3** `ol/interaction/Snap` — vertex snapping between shapes
+- [x] **2B.4** Interaction state machine — only one interaction active at a time
 
 ### 2C — Layer Management (`LayerDrawer.jsx`)
 
-- [ ] **2C.1** MUI Drawer panel listing all user-defined layers
-- [ ] **2C.2** Create / rename / delete layers
-- [ ] **2C.3** Toggle layer visibility
-- [ ] **2C.4** Change layer colors via color picker
-- [ ] **2C.5** Highlight toggle for individual features
+- [x] **2C.1** MUI Drawer panel listing all user-defined layers
+- [x] **2C.2** Create / rename / delete layers
+- [x] **2C.3** Toggle layer visibility
+- [x] **2C.4** Change layer colors via color picker
+- [x] **2C.5** Highlight toggle for individual features
 
 ### Deliverables
 - All four geometry types can be drawn, edited, moved, and deleted
