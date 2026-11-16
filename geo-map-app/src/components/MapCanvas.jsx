@@ -104,11 +104,15 @@ const MapCanvas = ({
     mapRef.current = map;
     console.log('🗺️ OpenLayers map successfully initialized');
 
-    // Cleanup when component unmounts
+    // Cleanup when component unmounts (handles React 18/19 StrictMode properly)
     return () => {
       if (mapRef.current) {
         mapRef.current.setTarget(undefined);
         mapRef.current = null;
+      }
+      // Clear registry so stale layers are not retained across remounts
+      if (layerRegistryRef.current && typeof layerRegistryRef.current.clear === 'function') {
+        layerRegistryRef.current.clear();
       }
     };
   }, []);
@@ -124,24 +128,34 @@ const MapCanvas = ({
     const map = mapRef.current;
     if (!map) return;
 
+    // Ensure layer registry is a valid Map instance
+    if (!layerRegistryRef.current || !(layerRegistryRef.current instanceof Map)) {
+      layerRegistryRef.current = new Map();
+    }
     const registry = layerRegistryRef.current;
     const currentLayerIds = new Set(layers.map((l) => l.id));
 
     // 1. Remove deleted layers from map
-    for (const [id, entry] of registry.entries()) {
+    const existingIds = Array.from(registry.keys());
+    for (const id of existingIds) {
       if (!currentLayerIds.has(id)) {
-        map.removeLayer(entry.vectorLayer);
+        const entry = registry.get(id);
+        if (entry && entry.vectorLayer) {
+          map.removeLayer(entry.vectorLayer);
+        }
         registry.delete(id);
       }
     }
 
     // 2. Add or update layers
+    const mapLayers = map.getLayers().getArray();
     layers.forEach((layerDef) => {
       let entry = registry.get(layerDef.id);
 
-      if (!entry) {
-        // Create new VectorSource for this layer
-        const vectorSource = new VectorSource();
+      // If entry doesn't exist, OR if map was recreated and doesn't contain this layer yet
+      if (!entry || !mapLayers.includes(entry.vectorLayer)) {
+        // Reuse existing vector source if available, or create new one
+        const vectorSource = entry ? entry.vectorSource : new VectorSource();
 
         // Create new VectorLayer with a dynamic style function
         const vectorLayer = new VectorLayer({
@@ -174,12 +188,14 @@ const MapCanvas = ({
 
   // Helper: Count shapes in each layer and report back to parent
   const updateFeatureCounts = () => {
-    if (!onFeaturesCountChange) return;
+    if (!onFeaturesCountChange || !layerRegistryRef.current) return;
 
     const counts = {};
-    layerRegistryRef.current.forEach((entry, layerId) => {
-      counts[layerId] = entry.vectorSource.getFeatures().length;
-    });
+    if (layerRegistryRef.current instanceof Map) {
+      layerRegistryRef.current.forEach((entry, layerId) => {
+        counts[layerId] = entry.vectorSource ? entry.vectorSource.getFeatures().length : 0;
+      });
+    }
 
     onFeaturesCountChange(counts);
   };
@@ -204,7 +220,10 @@ const MapCanvas = ({
 
     cleanupInteractions();
 
-    const activeEntry = layerRegistryRef.current.get(activeLayerId);
+    const activeEntry =
+      layerRegistryRef.current instanceof Map
+        ? layerRegistryRef.current.get(activeLayerId)
+        : null;
     if (!activeEntry) return;
 
     const activeSource = activeEntry.vectorSource;
@@ -346,7 +365,10 @@ const MapCanvas = ({
         if (clickedFeature) {
           // Find which layer owns this feature
           const layerId = clickedFeature.get('layerId');
-          const entry = layerRegistryRef.current.get(layerId);
+          const entry =
+            layerRegistryRef.current instanceof Map
+              ? layerRegistryRef.current.get(layerId)
+              : null;
           if (entry) {
             // Remove feature from OpenLayers source
             entry.vectorSource.removeFeature(clickedFeature);
@@ -404,7 +426,10 @@ const MapCanvas = ({
     if (!feature) return;
 
     const layerId = feature.get('layerId');
-    const entry = layerRegistryRef.current.get(layerId);
+    const entry =
+      layerRegistryRef.current instanceof Map
+        ? layerRegistryRef.current.get(layerId)
+        : null;
     if (entry) {
       entry.vectorSource.removeFeature(feature);
       updateFeatureCounts();
