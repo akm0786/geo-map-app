@@ -17,9 +17,14 @@ npm run dev
 
 ## Current Status
 - ✅ Phase 1: Project Bootstrap & Base Map
-- 🔲 Phase 2: Geometry Tools & Layer Controls
-- 🔲 Phase 3: Offline Persistence
-- 🔲 Phase 4: Backend API
-- 🔲 Phase 5: Sync Engine
+- ✅ Phase 2: Geometry Tools & Layer Controls
+  - Point, Rectangle, Polygon, and Route (with directional arrows) drawing tools
+  - Vertex modification (Modify), shape translation (Translate), and snapping (Snap)
+  - Custom layer management (create, rename, color palette, visibility toggle, delete)
+  - Shape properties inspector (rename, reassign layers, golden glow highlight, delete)
+  - Full-row layer selection and live shape counters
+- 🔲 Phase 3: Offline Persistence (Dexie.js)
+- 🔲 Phase 4: Backend API (Node/Express/MongoDB)
+- 🔲 Phase 5: Sync Engine & Conflict Resolution
 - 🔲 Phase 6: UI Polish & PWA
 - 🔲 Phase 7: Testing & QA

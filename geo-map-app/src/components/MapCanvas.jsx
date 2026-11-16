@@ -25,7 +25,8 @@ import React, { useRef, useEffect, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 
 // --- OpenLayers Core ---
-import Map from 'ol/Map';
+// Aliased as OLMap to avoid shadowing native JavaScript `Map` data structure
+import OLMap from 'ol/Map';
 import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
 import OSM from 'ol/source/OSM';
@@ -71,6 +72,10 @@ const MapCanvas = ({
   // Currently active OpenLayers interactions
   const activeInteractionsRef = useRef([]);
 
+  // Keep a fresh reference to layers for interactions without triggering teardowns
+  const layersRef = useRef(layers);
+  layersRef.current = layers;
+
   // State for feature properties inspection modal
   const [selectedFeature, setSelectedFeature] = useState(null);
   const [selectedFeatureLayerName, setSelectedFeatureLayerName] = useState('');
@@ -82,8 +87,8 @@ const MapCanvas = ({
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    // Create the OpenLayers Map instance
-    const map = new Map({
+    // Create the OpenLayers Map instance (using OLMap to avoid native JS Map name collision)
+    const map = new OLMap({
       target: mapContainerRef.current,
       layers: [
         // Base World Map Tile Layer
@@ -157,6 +162,13 @@ const MapCanvas = ({
         // Reuse existing vector source if available, or create new one
         const vectorSource = entry ? entry.vectorSource : new VectorSource();
 
+        // Attach listeners to automatically keep feature counts in sync
+        if (!entry) {
+          vectorSource.on('addfeature', () => updateFeatureCounts());
+          vectorSource.on('removefeature', () => updateFeatureCounts());
+          vectorSource.on('clear', () => updateFeatureCounts());
+        }
+
         // Create new VectorLayer with a dynamic style function
         const vectorLayer = new VectorLayer({
           source: vectorSource,
@@ -181,9 +193,6 @@ const MapCanvas = ({
         entry.vectorLayer.setStyle((feature) => createFeatureStyle(feature, layerDef.color));
       }
     });
-
-    // Refresh feature counts in parent UI
-    updateFeatureCounts();
   }, [layers]);
 
   // Helper: Count shapes in each layer and report back to parent
@@ -227,7 +236,7 @@ const MapCanvas = ({
     if (!activeEntry) return;
 
     const activeSource = activeEntry.vectorSource;
-    const activeLayerDef = layers.find((l) => l.id === activeLayerId);
+    const activeLayerDef = layersRef.current.find((l) => l.id === activeLayerId);
     const activeColor = activeLayerDef ? activeLayerDef.color : '#1976d2';
 
     // ----------------------------------------------------------
@@ -287,12 +296,8 @@ const MapCanvas = ({
           feature.set('isDeleted', false);
           feature.set('createdAt', new Date().toISOString());
           feature.set('updatedAt', new Date().toISOString());
-
-          // Apply initial style
-          feature.setStyle(createFeatureStyle(feature, activeColor));
-
-          // Schedule feature count update on next tick
-          setTimeout(updateFeatureCounts, 50);
+          // Feature inherits styling dynamically from its VectorLayer style function.
+          // This allows layer color changes to immediately reflect across all features!
         });
 
         // Add Draw interaction to map
@@ -339,7 +344,7 @@ const MapCanvas = ({
     }
 
     return cleanupInteractions;
-  }, [activeTool, activeLayerId, layers]);
+  }, [activeTool, activeLayerId]);
 
   // ============================================================
   // Step 4: Handle Map Clicks for Select & Delete Modes
@@ -382,7 +387,7 @@ const MapCanvas = ({
       if (activeTool === 'select') {
         if (clickedFeature) {
           const layerId = clickedFeature.get('layerId');
-          const layerDef = layers.find((l) => l.id === layerId);
+          const layerDef = layersRef.current.find((l) => l.id === layerId);
 
           setSelectedFeature(clickedFeature);
           setSelectedFeatureLayerName(layerDef ? layerDef.name : 'Layer');
@@ -400,25 +405,46 @@ const MapCanvas = ({
     return () => {
       map.un('singleclick', handleSingleClick);
     };
-  }, [activeTool, layers]);
+  }, [activeTool]);
 
   // ============================================================
   // Feature Inspector Handlers
   // ============================================================
-  // Save updated properties (Name, Highlight toggle)
-  const handleSaveFeatureProperties = ({ name, isHighlighted }) => {
+  // Save updated properties (Name, Highlight toggle, Layer reassignment)
+  const handleSaveFeatureProperties = ({ name, isHighlighted, layerId }) => {
     if (!selectedFeature) return;
 
     selectedFeature.set('name', name);
     selectedFeature.set('isHighlighted', isHighlighted);
     selectedFeature.set('updatedAt', new Date().toISOString());
 
-    // Re-render feature with updated style (highlighted or normal)
-    const layerId = selectedFeature.get('layerId');
-    const layerDef = layers.find((l) => l.id === layerId);
+    // Reassign feature to a different layer if requested
+    const currentLayerId = selectedFeature.get('layerId');
+    if (layerId && layerId !== currentLayerId) {
+      const oldEntry =
+        layerRegistryRef.current instanceof Map
+          ? layerRegistryRef.current.get(currentLayerId)
+          : null;
+      const newEntry =
+        layerRegistryRef.current instanceof Map
+          ? layerRegistryRef.current.get(layerId)
+          : null;
+
+      if (oldEntry && newEntry) {
+        oldEntry.vectorSource.removeFeature(selectedFeature);
+        selectedFeature.set('layerId', layerId);
+        newEntry.vectorSource.addFeature(selectedFeature);
+      }
+    }
+
+    // Apply custom highlight style if enabled, otherwise clear style to inherit layer style
+    const targetLayerId = layerId || currentLayerId;
+    const layerDef = layersRef.current.find((l) => l.id === targetLayerId);
     const color = layerDef ? layerDef.color : '#1976d2';
 
-    selectedFeature.setStyle(createFeatureStyle(selectedFeature, color));
+    selectedFeature.setStyle(
+      isHighlighted ? createFeatureStyle(selectedFeature, color) : null
+    );
   };
 
   // Delete selected feature from inspector dialog
@@ -460,7 +486,7 @@ const MapCanvas = ({
       <FeaturePropertiesDialog
         open={inspectorOpen}
         feature={selectedFeature}
-        layerName={selectedFeatureLayerName}
+        layers={layers}
         onClose={() => setInspectorOpen(false)}
         onSave={handleSaveFeatureProperties}
         onDelete={handleDeleteFeatureFromInspector}

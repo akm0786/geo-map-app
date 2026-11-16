@@ -9,13 +9,14 @@
 //     - "Delivery Zones" layer (Green polygons)
 //     - "Hazard Areas" layer (Red rectangles)
 //
-// Key features implemented here:
-//   1. List all active layers with their assigned colors and shape counts
-//   2. Set the "Active Drawing Layer" (where new shapes will be placed)
+// Capabilities:
+//   1. List all active layers with assigned colors and shape counts
+//   2. Set the "Active Drawing Layer" (click anywhere on the row)
 //   3. Toggle layer visibility on/off (`layer.visible`)
-//   4. Create new layers with custom names and colors
-//   5. Change existing layer colors via a quick swatch palette
-//   6. Delete custom layers
+//   4. Rename existing layers
+//   5. Create new layers with custom names and colors
+//   6. Change existing layer colors via a quick swatch palette
+//   7. Delete custom layers
 // ============================================================
 
 import React, { useState } from 'react';
@@ -31,7 +32,6 @@ import {
   IconButton,
   Box,
   Button,
-  Switch,
   Radio,
   Dialog,
   DialogTitle,
@@ -39,7 +39,6 @@ import {
   DialogActions,
   TextField,
   Tooltip,
-  Chip,
 } from '@mui/material';
 
 // --- Icons ---
@@ -49,13 +48,10 @@ import AddCircleIcon from '@mui/icons-material/AddCircle';
 import DeleteOutlinedIcon from '@mui/icons-material/DeleteOutlined';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
-import PaletteIcon from '@mui/icons-material/Palette';
+import EditIcon from '@mui/icons-material/Edit';
 
 // ============================================================
 // Preset Color Palette for Layers
-// ------------------------------------------------------------
-// Curated list of vibrant, distinct colors that show up clearly
-// on both standard street maps and satellite views.
 // ============================================================
 export const PRESET_LAYER_COLORS = [
   '#1976d2', // Blue (Primary)
@@ -80,22 +76,25 @@ const LayerDrawer = ({
   onToggleLayerVisibility,
   onCreateLayer,
   onUpdateLayerColor,
+  onRenameLayer,
   onDeleteLayer,
 }) => {
   // --- Local Dialog States ---
-  // Controls the "Create Layer" popup modal
+  // Create Layer popup modal
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newLayerName, setNewLayerName] = useState('');
   const [selectedColor, setSelectedColor] = useState(PRESET_LAYER_COLORS[0]);
 
-  // Controls the "Change Color" popover modal
+  // Rename Layer popup modal
+  const [renameLayerId, setRenameLayerId] = useState(null);
+  const [renamedName, setRenamedName] = useState('');
+
+  // Change Color modal
   const [colorPickerLayerId, setColorPickerLayerId] = useState(null);
 
   // Handler: Open create layer dialog
   const handleOpenCreateDialog = () => {
-    // Generate a default suggested name like "Layer 2", "Layer 3"
     setNewLayerName(`Layer ${layers.length + 1}`);
-    // Pick next available color from palette
     const nextColor = PRESET_LAYER_COLORS[layers.length % PRESET_LAYER_COLORS.length];
     setSelectedColor(nextColor);
     setCreateDialogOpen(true);
@@ -115,6 +114,22 @@ const LayerDrawer = ({
     setNewLayerName('');
   };
 
+  // Handler: Open rename dialog
+  const handleOpenRenameDialog = (layer, e) => {
+    e.stopPropagation(); // Don't trigger layer selection
+    setRenameLayerId(layer.id);
+    setRenamedName(layer.name);
+  };
+
+  // Handler: Confirm rename
+  const handleConfirmRename = () => {
+    if (renameLayerId && renamedName.trim() && onRenameLayer) {
+      onRenameLayer(renameLayerId, renamedName.trim());
+    }
+    setRenameLayerId(null);
+    setRenamedName('');
+  };
+
   return (
     <>
       {/* ============================================================
@@ -127,7 +142,7 @@ const LayerDrawer = ({
         variant="persistent"
         sx={{
           '& .MuiDrawer-paper': {
-            width: 320,
+            width: 330,
             padding: 2,
             boxShadow: '-2px 0 8px rgba(0,0,0,0.15)',
           },
@@ -144,14 +159,14 @@ const LayerDrawer = ({
         </Box>
 
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-          Radio button selects target layer for new drawings. Toggle switch hides/shows layer.
+          Click row to set active drawing layer. Toggle switch to show/hide.
         </Typography>
 
         <Divider sx={{ mb: 2 }} />
 
         {/* --- Add Layer Button --- */}
         <Button
-          variant="outlined"
+          variant="contained"
           color="primary"
           startIcon={<AddCircleIcon />}
           fullWidth
@@ -169,51 +184,69 @@ const LayerDrawer = ({
             return (
               <ListItem
                 key={layer.id}
+                onClick={() => onSetActiveLayer(layer.id)}
                 sx={{
-                  border: '1px solid',
+                  border: '1.5px solid',
                   borderColor: isActive ? 'primary.main' : 'divider',
-                  borderRadius: 1.5,
+                  borderRadius: 2,
                   mb: 1.5,
-                  backgroundColor: isActive ? 'action.selected' : 'background.paper',
-                  transition: 'border-color 0.2s',
-                  pr: 10, // Padding for secondary actions
+                  backgroundColor: isActive ? 'rgba(25, 118, 210, 0.08)' : 'background.paper',
+                  cursor: 'pointer',
+                  pr: 12, // Space for action icons
+                  transition: 'all 0.15s ease-in-out',
+                  '&:hover': {
+                    borderColor: 'primary.light',
+                    backgroundColor: isActive
+                      ? 'rgba(25, 118, 210, 0.12)'
+                      : 'rgba(0, 0, 0, 0.03)',
+                  },
                 }}
               >
-                {/* Radio button to select this layer as active target for drawing */}
-                <ListItemIcon sx={{ minWidth: 36 }}>
-                  <Tooltip title={isActive ? 'Active drawing target' : 'Click to make active target for drawing'}>
-                    <Radio
-                      checked={isActive}
-                      onChange={() => onSetActiveLayer(layer.id)}
-                      value={layer.id}
-                      size="small"
-                      color="primary"
-                    />
-                  </Tooltip>
+                {/* Radio button to select this layer as active target */}
+                <ListItemIcon sx={{ minWidth: 32 }}>
+                  <Radio
+                    checked={isActive}
+                    value={layer.id}
+                    size="small"
+                    color="primary"
+                    sx={{ p: 0.5 }}
+                  />
                 </ListItemIcon>
 
                 {/* Layer Color Swatch & Name */}
                 <ListItemText
                   primary={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      {/* Interactive Color Circle Swatch */}
-                      <Tooltip title="Click to change layer color">
+                      {/* Clickable Color Swatch */}
+                      <Tooltip title="Click to change color">
                         <Box
-                          onClick={() => setColorPickerLayerId(layer.id)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setColorPickerLayerId(layer.id);
+                          }}
                           sx={{
-                            width: 18,
-                            height: 18,
+                            width: 16,
+                            height: 16,
                             borderRadius: '50%',
                             backgroundColor: layer.color,
                             cursor: 'pointer',
                             border: '2px solid #fff',
                             boxShadow: '0 0 2px rgba(0,0,0,0.5)',
                             flexShrink: 0,
+                            '&:hover': { transform: 'scale(1.2)' },
+                            transition: 'transform 0.15s',
                           }}
                         />
                       </Tooltip>
 
-                      <Typography variant="subtitle2" noWrap sx={{ fontWeight: isActive ? 700 : 500 }}>
+                      <Typography
+                        variant="subtitle2"
+                        noWrap
+                        sx={{
+                          fontWeight: isActive ? 700 : 500,
+                          color: layer.visible ? 'text.primary' : 'text.disabled',
+                        }}
+                      >
                         {layer.name}
                       </Typography>
                     </Box>
@@ -221,36 +254,64 @@ const LayerDrawer = ({
                   secondary={
                     <Typography variant="caption" color="text.secondary">
                       {layer.featureCount || 0} shape{(layer.featureCount || 0) === 1 ? '' : 's'}
+                      {isActive ? ' • (Active)' : ''}
                     </Typography>
                   }
                 />
 
-                {/* Secondary Actions: Visibility Switch & Delete */}
+                {/* Secondary Actions: Edit Name, Toggle Visibility, Delete */}
                 <ListItemSecondaryAction>
-                  {/* Visibility Toggle Switch */}
+                  {/* Rename Layer Button */}
+                  <Tooltip title="Rename layer">
+                    <IconButton
+                      edge="end"
+                      size="small"
+                      onClick={(e) => handleOpenRenameDialog(layer, e)}
+                      sx={{ p: 0.5 }}
+                    >
+                      <EditIcon sx={{ fontSize: 16 }} />
+                    </IconButton>
+                  </Tooltip>
+
+                  {/* Visibility Toggle Button */}
                   <Tooltip title={layer.visible ? 'Hide layer' : 'Show layer'}>
                     <IconButton
                       edge="end"
                       size="small"
-                      onClick={() => onToggleLayerVisibility(layer.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleLayerVisibility(layer.id);
+                      }}
                       color={layer.visible ? 'primary' : 'default'}
+                      sx={{ p: 0.5, ml: 0.25 }}
                     >
-                      {layer.visible ? <VisibilityIcon fontSize="small" /> : <VisibilityOffIcon fontSize="small" />}
+                      {layer.visible ? (
+                        <VisibilityIcon sx={{ fontSize: 18 }} />
+                      ) : (
+                        <VisibilityOffIcon sx={{ fontSize: 18 }} />
+                      )}
                     </IconButton>
                   </Tooltip>
 
-                  {/* Delete Layer Button (disabled if only 1 layer remaining) */}
-                  <Tooltip title={layers.length > 1 ? 'Delete layer' : 'Cannot delete the only layer'}>
+                  {/* Delete Layer Button */}
+                  <Tooltip
+                    title={
+                      layers.length > 1 ? 'Delete layer' : 'Cannot delete the only remaining layer'
+                    }
+                  >
                     <span>
                       <IconButton
                         edge="end"
                         size="small"
                         disabled={layers.length <= 1}
-                        onClick={() => onDeleteLayer(layer.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteLayer(layer.id);
+                        }}
                         color="error"
-                        sx={{ ml: 0.5 }}
+                        sx={{ p: 0.5, ml: 0.25 }}
                       >
-                        <DeleteOutlinedIcon fontSize="small" />
+                        <DeleteOutlinedIcon sx={{ fontSize: 18 }} />
                       </IconButton>
                     </span>
                   </Tooltip>
@@ -264,7 +325,12 @@ const LayerDrawer = ({
       {/* ============================================================
           Modal: Create New Layer Dialog
           ============================================================ */}
-      <Dialog open={createDialogOpen} onClose={() => setCreateDialogOpen(false)} maxWidth="xs" fullWidth>
+      <Dialog
+        open={createDialogOpen}
+        onClose={() => setCreateDialogOpen(false)}
+        maxWidth="xs"
+        fullWidth
+      >
         <DialogTitle>Create New Layer</DialogTitle>
         <DialogContent dividers>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
@@ -277,6 +343,9 @@ const LayerDrawer = ({
               size="small"
               placeholder="e.g. Delivery Zones, Vehicles"
               autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleConfirmCreateLayer();
+              }}
             />
 
             {/* Color Swatch Picker */}
@@ -308,8 +377,39 @@ const LayerDrawer = ({
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleConfirmCreateLayer} variant="contained" disabled={!newLayerName.trim()}>
-            Create
+          <Button
+            onClick={handleConfirmCreateLayer}
+            variant="contained"
+            disabled={!newLayerName.trim()}
+          >
+            Create Layer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ============================================================
+          Modal: Rename Layer Dialog
+          ============================================================ */}
+      <Dialog open={Boolean(renameLayerId)} onClose={() => setRenameLayerId(null)} maxWidth="xs" fullWidth>
+        <DialogTitle>Rename Layer</DialogTitle>
+        <DialogContent dividers>
+          <TextField
+            label="Layer Name"
+            value={renamedName}
+            onChange={(e) => setRenamedName(e.target.value)}
+            fullWidth
+            size="small"
+            autoFocus
+            sx={{ mt: 1 }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleConfirmRename();
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRenameLayerId(null)}>Cancel</Button>
+          <Button onClick={handleConfirmRename} variant="contained" disabled={!renamedName.trim()}>
+            Save
           </Button>
         </DialogActions>
       </Dialog>

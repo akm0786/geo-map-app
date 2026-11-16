@@ -144,7 +144,20 @@ function App() {
     );
   };
 
-  // 4. Delete a layer
+  // 4. Rename a layer
+  const handleRenameLayer = (layerId, newName) => {
+    setLayers((prev) =>
+      prev.map((layer) => {
+        if (layer.id === layerId) {
+          showNotification(`Renamed layer to "${newName}"`, 'success');
+          return { ...layer, name: newName };
+        }
+        return layer;
+      })
+    );
+  };
+
+  // 5. Delete a layer
   const handleDeleteLayer = (layerId) => {
     if (layers.length <= 1) {
       showNotification('Cannot delete the only remaining layer', 'warning');
@@ -165,12 +178,18 @@ function App() {
 
   // 5. Update feature counts from OpenLayers MapCanvas
   const handleFeaturesCountChange = (counts) => {
-    setLayers((prev) =>
-      prev.map((layer) => ({
+    setLayers((prev) => {
+      // Check if counts actually changed to avoid redundant re-renders
+      const hasChanged = prev.some(
+        (layer) => (counts[layer.id] || 0) !== (layer.featureCount || 0)
+      );
+      if (!hasChanged) return prev; // Retain existing state reference
+
+      return prev.map((layer) => ({
         ...layer,
         featureCount: counts[layer.id] || 0,
-      }))
-    );
+      }));
+    });
   };
 
   // Calculate total features across all layers
@@ -235,6 +254,7 @@ function App() {
           onToggleLayerVisibility={handleToggleLayerVisibility}
           onCreateLayer={handleCreateLayer}
           onUpdateLayerColor={handleUpdateLayerColor}
+          onRenameLayer={handleRenameLayer}
           onDeleteLayer={handleDeleteLayer}
         />
 

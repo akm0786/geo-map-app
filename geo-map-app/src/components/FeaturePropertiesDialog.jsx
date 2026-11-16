@@ -6,9 +6,9 @@
 //
 // Capabilities:
 //   1. Edit shape display name (e.g., "Warehouse Alpha", "Zone 3")
-//   2. Toggle Highlighting (`isHighlighted`): activates the golden
+//   2. Reassign shape to a different layer (e.g., move to "Delivery Zones")
+//   3. Toggle Highlighting (`isHighlighted`): activates the golden
 //      glowing outline on the map
-//   3. View shape coordinates / type summary
 //   4. Delete the selected shape directly
 // ============================================================
 
@@ -26,6 +26,10 @@ import {
   Box,
   Chip,
   Divider,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import StarIcon from '@mui/icons-material/Star';
@@ -33,19 +37,11 @@ import LayersIcon from '@mui/icons-material/Layers';
 
 // ============================================================
 // FeaturePropertiesDialog Component
-// ------------------------------------------------------------
-// Props:
-//   open (boolean) — Whether dialog is visible
-//   feature (ol/Feature) — The selected OpenLayers feature
-//   layerName (string) — Name of the layer this feature belongs to
-//   onClose (function) — Callback when closing dialog
-//   onSave (function) — Callback when user saves updated properties
-//   onDelete (function) — Callback when user deletes the feature
 // ============================================================
 const FeaturePropertiesDialog = ({
   open,
   feature,
-  layerName,
+  layers = [],
   onClose,
   onSave,
   onDelete,
@@ -53,14 +49,16 @@ const FeaturePropertiesDialog = ({
   // Local form state for editing
   const [name, setName] = useState('');
   const [isHighlighted, setIsHighlighted] = useState(false);
+  const [selectedLayerId, setSelectedLayerId] = useState('');
 
   // When a feature is selected, populate the form fields from its properties
   useEffect(() => {
     if (feature) {
       setName(feature.get('name') || 'Unnamed Shape');
       setIsHighlighted(feature.get('isHighlighted') === true);
+      setSelectedLayerId(feature.get('layerId') || (layers[0] ? layers[0].id : ''));
     }
-  }, [feature]);
+  }, [feature, layers]);
 
   if (!feature) return null;
 
@@ -72,6 +70,7 @@ const FeaturePropertiesDialog = ({
     onSave({
       name: name.trim() || 'Unnamed Shape',
       isHighlighted,
+      layerId: selectedLayerId,
     });
     onClose();
   };
@@ -94,17 +93,12 @@ const FeaturePropertiesDialog = ({
 
       <DialogContent dividers>
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, pt: 1 }}>
-          {/* Layer and ID metadata */}
+          {/* Metadata */}
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <LayersIcon fontSize="small" /> Layer: <strong>{layerName || 'Default'}</strong>
-            </Typography>
             <Typography variant="caption" color="text.secondary">
               ID: {String(featureId).substring(0, 8)}...
             </Typography>
           </Box>
-
-          <Divider />
 
           {/* Editable Feature Name */}
           <TextField
@@ -114,11 +108,40 @@ const FeaturePropertiesDialog = ({
             fullWidth
             size="small"
             placeholder="e.g. Storage Depot, Route A"
-            helperText="Custom name to identify this shape"
+            helperText="Custom label for this shape"
           />
 
+          {/* Reassign to Layer Dropdown */}
+          <FormControl fullWidth size="small">
+            <InputLabel id="feature-layer-select-label">Assign to Layer</InputLabel>
+            <Select
+              labelId="feature-layer-select-label"
+              value={selectedLayerId}
+              label="Assign to Layer"
+              onChange={(e) => setSelectedLayerId(e.target.value)}
+            >
+              {layers.map((layer) => (
+                <MenuItem key={layer.id} value={layer.id}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Box
+                      sx={{
+                        width: 12,
+                        height: 12,
+                        borderRadius: '50%',
+                        backgroundColor: layer.color,
+                        boxShadow: '0 0 2px rgba(0,0,0,0.4)',
+                      }}
+                    />
+                    <Typography variant="body2">{layer.name}</Typography>
+                  </Box>
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <Divider />
+
           {/* Highlight Toggle Switch */}
-          {/* Toggling this turns on the gold glowing outline on the map */}
           <FormControlLabel
             control={
               <Switch
