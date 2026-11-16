@@ -1,0 +1,41 @@
+/* ============================================================
+   Global Styles (index.css)
+   ------------------------------------------------------------
+   These styles apply to the entire application.
+   
+   Key decisions:
+   - Remove all default margin/padding so the map can fill
+     the entire browser window edge-to-edge.
+   - Set html and body to 100% height so child elements
+     (like the map) can also be full-height.
+   - Use the system font stack for a clean, native look.
+   ============================================================ */
+
+/* Reset: Remove default browser spacing */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Make html and body fill the entire viewport */
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden; /* Prevent scrollbars — the map handles its own scrolling */
+}
+
+/* The root div where React renders — also needs to fill the viewport */
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+/* Use a clean system font stack */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans',
+    'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
